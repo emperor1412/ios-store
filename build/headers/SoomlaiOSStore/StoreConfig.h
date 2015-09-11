@@ -26,13 +26,18 @@
 extern const int METADATA_VERSION;
 
 /**
- When set to 'YES', this removes the need to verify purchases when there's no
- signature.
- NOTE: This is useful while you are in development and testing stages of your 
- game.
-
- @warning Set to 'NO' before you publish your app!!!
+ When set to 'YES', this will verify purchases on the SOOMLA server
  */
 extern BOOL VERIFY_PURCHASES;
+
+/**
+ When set to 'YES', this will tell the verification process to mark a purchase 
+ as successful in cases where itunes servers are down or unresponsive.
+ 
+ @warning SOOMLA recommends that you leave this value set to 'NO'. Itunes 
+            services are usually UP. If you're still testing (Sandbox) then 
+            you might want to turn this on to get your purchases running.
+ */
+extern BOOL VERIFY_ON_ITUNES_FAILURE;
 
 extern NSString* VERIFY_URL;

@@ -34,6 +34,14 @@
 
 #import "SoomlaVerification.h"
 
+#define SOOMLA_STORE_VERSION @"3.6.13"
+
+@interface SoomlaStore (){
+    NSMutableArray* verifications;
+}
+@end
+
+
 @implementation SoomlaStore
 
 @synthesize initialized;
@@ -52,6 +60,10 @@ static NSString* TAG = @"SOOMLA SoomlaStore";
     return _instance;
 }
 
++ (NSString*)getVersion {
+    return SOOMLA_STORE_VERSION;
+}
+
 - (BOOL)initializeWithStoreAssets:(id<IStoreAssets>)storeAssets {
     if (self.initialized) {
         LogDebug(TAG, @"SoomlaStore already initialized.");
@@ -59,7 +71,7 @@ static NSString* TAG = @"SOOMLA SoomlaStore";
     }
     
     LogDebug(TAG, @"SoomlaStore Initializing ...");
-
+    
     [StorageManager getInstance];
     [[StoreInfo getInstance] setStoreAssets:storeAssets];
 
@@ -77,9 +89,19 @@ static NSString* TAG = @"SOOMLA SoomlaStore";
     if ([SKPaymentQueue canMakePayments]) {
         [[SKPaymentQueue defaultQueue] addTransactionObserver:self];
         [StoreEventHandling postBillingSupported];
+        if (!verifications) {
+            verifications = [NSMutableArray array];
+        }
+        [self retryUnfinishedTransactions];
     } else {
         [StoreEventHandling postBillingNotSupported];
     }
+}
+
+- (void)retryUnfinishedTransactions {
+    NSArray* transactions = [[SKPaymentQueue defaultQueue] transactions];
+    LogDebug(TAG, ([NSString stringWithFormat:@"Retrying any unfinished transactions: %lu", (unsigned long)transactions.count]));
+    [self paymentQueue:[SKPaymentQueue defaultQueue] updatedTransactions:transactions];
 }
 
 static NSString* developerPayload = NULL;
@@ -194,6 +216,10 @@ static NSString* developerPayload = NULL;
     if (version >= 7) {
         receiptUrl = [[NSBundle mainBundle] appStoreReceiptURL];
     }
+    NSString* receiptUrlStr = @"";
+    if (receiptUrl) {
+        receiptUrlStr = [receiptUrl absoluteString];
+    }
     
     NSString *receiptString = @"";
     if ([[NSFileManager defaultManager] fileExistsAtPath:[receiptUrl path]]) {
@@ -232,7 +258,7 @@ static NSString* developerPayload = NULL;
 
 - (void)purchaseVerified:(NSNotification*)notification{
     [[NSNotificationCenter defaultCenter] removeObserver:self name:EVENT_MARKET_PURCHASE_VERIF object:notification.object];
-    [[NSNotificationCenter defaultCenter] removeObserver:self name:EVENT_UNEXPECTED_ERROR_IN_STORE object:notification.object];
+    [[NSNotificationCenter defaultCenter] removeObserver:self name:EVENT_UNEXPECTED_STORE_ERROR object:notification.object];
     
     NSDictionary* userInfo = notification.userInfo;
     PurchasableVirtualItem* purchasable = [userInfo objectForKey:DICT_ELEMENT_PURCHASABLE];
@@ -242,18 +268,23 @@ static NSString* developerPayload = NULL;
     if (verified) {
         [self finalizeTransaction:transaction forPurchasable:purchasable];
     } else {
-        LogError(TAG, @"Failed to verify transaction receipt. The user will not get what he just bought.");
-        if (transaction) {
-            [[SKPaymentQueue defaultQueue] finishTransaction: transaction];
-        }
-
-        [StoreEventHandling postUnexpectedError:ERR_VERIFICATION_FAIL forObject:self];
+        LogError(TAG, ([NSString stringWithFormat:@"Failed to verify transaction receipt for %@. The user will not get what he just bought.", purchasable]));
+        [self finishFailedTransaction:transaction];
     }
+    
+    [verifications removeObject:notification.object];
+}
+
+- (void)finishFailedTransaction:(SKPaymentTransaction *)transaction {
+    if(transaction)
+        [[SKPaymentQueue defaultQueue] finishTransaction: transaction];
+    [StoreEventHandling postUnexpectedError:ERR_VERIFICATION_FAIL forObject:self];
 }
 
 - (void)unexpectedVerificationError:(NSNotification*)notification{
     [[NSNotificationCenter defaultCenter] removeObserver:self name:EVENT_MARKET_PURCHASE_VERIF object:notification.object];
-    [[NSNotificationCenter defaultCenter] removeObserver:self name:EVENT_UNEXPECTED_ERROR_IN_STORE object:notification.object];
+    [[NSNotificationCenter defaultCenter] removeObserver:self name:EVENT_UNEXPECTED_STORE_ERROR object:notification.object];
+    [verifications removeObject:notification.object];
 }
 
 - (void)givePurchasedItem:(SKPaymentTransaction *)transaction
@@ -263,17 +294,19 @@ static NSString* developerPayload = NULL;
 
         if (VERIFY_PURCHASES) {
             SoomlaVerification *sv = [[SoomlaVerification alloc] initWithTransaction:transaction andPurchasable:pvi];
-            
+                   
             [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(purchaseVerified:) name:EVENT_MARKET_PURCHASE_VERIF object:sv];
-            [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(unexpectedVerificationError:) name:EVENT_UNEXPECTED_ERROR_IN_STORE object:sv];
+            [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(unexpectedVerificationError:) name:EVENT_UNEXPECTED_STORE_ERROR object:sv];
 
             [sv verifyData];
+            
+            [verifications addObject:sv];
         } else {
             [self finalizeTransaction:transaction forPurchasable:pvi];
         }
 
     } @catch (VirtualItemNotFoundException* e) {
-        LogError(TAG, ([NSString stringWithFormat:@"An error occured when handling copmleted purchase for PurchasableVirtualItem with productId: %@"
+        LogError(TAG, ([NSString stringWithFormat:@"An error occured when handling completed purchase for PurchasableVirtualItem with productId: %@"
                         @". It's unexpected so an unexpected error is being emitted.", transaction.payment.productIdentifier]));
         [StoreEventHandling postUnexpectedError:ERR_PURCHASE_FAIL forObject:self];
         [[SKPaymentQueue defaultQueue] finishTransaction: transaction];
@@ -313,6 +346,7 @@ static NSString* developerPayload = NULL;
         @catch (VirtualItemNotFoundException* e) {
             LogError(TAG, ([NSString stringWithFormat:@"Couldn't find the CANCELLED VirtualCurrencyPack OR MarketItem with productId: %@"
                             @". It's unexpected so an unexpected error is being emitted.", transaction.payment.productIdentifier]));
+            
             [StoreEventHandling postUnexpectedError:ERR_GENERAL forObject:self];
         }
 

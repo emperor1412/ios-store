@@ -1,3 +1,31 @@
+### v3.6.13 [view commit logs](https://github.com/soomla/ios-store/compare/v3.6.12...v3.6.13)
+
+* Changes
+  * Added Fraud Protection flag to OnMarketPurchaseStarted event
+
+### v3.6.12 [view commit logs](https://github.com/soomla/ios-store/compare/v3.6.11...v3.6.12)
+
+* Changes
+  * Added version in code
+
+### v3.6.11 [view commit logs](https://github.com/soomla/ios-store/compare/v3.6.10...v3.6.11)
+
+* Fixes
+  * Fixed crash when using LocaliAPStore and getting verification confirmation from server
+
+* Changes
+  * Added refresh of receipt in case it doesn't exist, and finalize transaction if still doesn't exist after refresh
+
+### v3.6.10 [view commit logs](https://github.com/soomla/ios-store/compare/v3.6.9...v3.6.10)
+
+* Changes
+  * Added method to retry unfinished transactions after billing service is loaded.
+  * Allowing to force verification on purchases that failed verification b/c of itunes servers didn't work properly.
+  * For MarketPurchaseEvent we bundle the specific provider extra params inside a Hash
+
+* Fixes
+  * Saving SoomlaVerification objects' pointers until they are not needed anymore.
+
 ### v3.6.9 [view commit logs](https://github.com/soomla/ios-store/compare/v3.6.8...v3.6.9)
 
 * Changes

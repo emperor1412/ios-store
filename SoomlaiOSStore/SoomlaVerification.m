@@ -97,8 +97,14 @@ static NSMutableArray* cacheRetryRequestReceipt;
         NSURLConnection *conn = [[NSURLConnection alloc] initWithRequest:request delegate:self];
         [conn start];
     } else {
-        LogError(TAG, ([NSString stringWithFormat:@"An error occured while trying to get receipt data. Stopping the purchasing process for: %@", transaction.payment.productIdentifier]));
-        [StoreEventHandling postUnexpectedError:ERR_VERIFICATION_TIMEOUT forObject:self];
+        if (tryAgain) {
+            tryAgain = NO;
+            LogDebug(TAG, @"Receipt not found. Refreshing...");
+            [self refreshReceipt];
+        } else {
+            LogError(TAG, ([NSString stringWithFormat:@"An error occured while trying to get receipt data. Stopping the purchasing process for: %@", transaction.payment.productIdentifier]));
+            [StoreEventHandling postMarketPurchaseVerification:NO forItem:purchasable andTransaction:transaction forObject:self];
+        }
     }
 }
 
@@ -115,6 +121,13 @@ static NSMutableArray* cacheRetryRequestReceipt;
 - (NSCachedURLResponse *)connection:(NSURLConnection *)connection
                   willCacheResponse:(NSCachedURLResponse*)cachedResponse {
     return nil;
+}
+
+- (void)refreshReceipt {
+    SKReceiptRefreshRequest *req = [[SKReceiptRefreshRequest alloc] initWithReceiptProperties:nil];
+    req.delegate = self;
+    [cacheRetryRequestReceipt addObject:self];
+    [req start];
 }
 
 - (void)connectionDidFinishLoading:(NSURLConnection *)connection {
@@ -147,14 +160,14 @@ static NSMutableArray* cacheRetryRequestReceipt;
             if (needRefresh && tryAgain) {
                 LogDebug(TAG, @"Receipt refresh needed.");
                 tryAgain = NO;
-                SKReceiptRefreshRequest *req = [[SKReceiptRefreshRequest alloc] initWithReceiptProperties:nil];
-                req.delegate = self;
-                [cacheRetryRequestReceipt addObject:self];
-                [req start];
 
+                [self refreshReceipt];
+                
                 // we return here ...
                 return;
             }
+        } else {
+            LogDebug(TAG, @"purchase verified");
         }
         [StoreEventHandling postMarketPurchaseVerification:verified forItem:purchasable andTransaction:transaction forObject:self];
     } else {
@@ -179,6 +192,11 @@ static NSMutableArray* cacheRetryRequestReceipt;
         
         if ([errorMsg isEqualToString:@"ECONNRESET"]) {
             LogError(TAG, @"It appears that the iTunes servers are down. We can't verify this receipt.");
+            if (VERIFY_ON_ITUNES_FAILURE) {
+                LogDebug(TAG, @"You decided you want to allow situations where Itunes is down for verification. finalizing the purchase now.");
+                [StoreEventHandling postMarketPurchaseVerification:YES forItem:purchasable andTransaction:transaction forObject:self];
+                return;
+            }
         }
         
         LogError(TAG, ([NSString stringWithFormat:@"There was a problem when verifying (%@). Will try again later.", errorMsg]));
@@ -186,11 +204,6 @@ static NSMutableArray* cacheRetryRequestReceipt;
     }
 }
 
-- (void)connection:(NSURLConnection *)connection didFailWithError:(NSError *)error {
-    LogError(TAG, @"Failed to connect to verification server. Not doing anything ... the purchasing process will happen again next time the service is initialized.");
-    LogDebug(TAG, [error description]);
-    [StoreEventHandling postUnexpectedError:ERR_VERIFICATION_TIMEOUT forObject:self];
-}
 
 #pragma mark SKRequestDelegate methods
 
